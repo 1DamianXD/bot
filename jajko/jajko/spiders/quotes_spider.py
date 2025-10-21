@@ -3,17 +3,13 @@ import re
 
 
 class MySpider(scrapy.Spider):
-    name = 'idk'
-    start_urls = ['https://www.daswerk.org/']
+    name = 'daswerk'
+    start_urls = ['https://www.daswerk.org/programm']
 
     custom_settings = {
-        'FEEDS': {
-            'event.json': {
-                'format': 'json',
-                'overwrite': True,  # Overwrite event.json on each run
-                'encoding': 'utf8',
-            },
-        },
+        "FEEDS": {
+            "daswerk.json": {"format": "json", "overwrite": True, "encoding": "utf8"},
+        }
     }
 
     def parse(self, response):
@@ -41,7 +37,7 @@ class MySpider(scrapy.Spider):
         )
         time = time_match.group(0) if time_match else "-"
 
-        # Output to event.json
+        # Output to daswerk.json
         yield {
             'url': response.url,
             'event': title,
