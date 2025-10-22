@@ -14,12 +14,16 @@ JSON_FILE_LOFT = "loft.json"
 JSON_FILE_U4 = "u4_events.json"
 JSON_FILE_VENSTER = "venster99.json"
 JSON_FILE_RHIZ = "rhiz.json"
+JSON_FILE_LOOP = "loop.json"
+JSON_FILE_BADESCHIFF = "badeschiff.json"   # 🆕 added
 
 SPIDER_DASWERK = "daswerk"
 SPIDER_LOFT = "loft"
 SPIDER_U4 = "u4"
 SPIDER_VENSTER = "venster99"
 SPIDER_RHIZ = "rhiz"
+SPIDER_LOOP = "loop"
+SPIDER_BADESCHIFF = "bad"           # 🆕 added
 # ===============
 
 
@@ -31,47 +35,33 @@ def run_scrapy_spider(spider_name):
 
 
 def translate_date_to_english(text):
-    """Translate German day/month names into English inside a date string."""
+    """Translate German day/month names (full + abbreviated) into English."""
     if not text:
         return text
     translations = {
         "Montag": "Monday", "Dienstag": "Tuesday", "Mittwoch": "Wednesday",
         "Donnerstag": "Thursday", "Freitag": "Friday", "Samstag": "Saturday",
-        "Sonntag": "Sunday", "Januar": "January", "Februar": "February",
-        "März": "March", "April": "April", "Mai": "May", "Juni": "June",
-        "Juli": "July", "August": "August", "September": "September",
-        "Oktober": "October", "November": "November", "Dezember": "December",
-        "Okt": "October", "Dez": "December", "Nov": "November", "Sep": "September"
+        "Sonntag": "Sunday",
+        "Januar": "January", "Februar": "February", "März": "March", "April": "April",
+        "Mai": "May", "Juni": "June", "Juli": "July", "August": "August",
+        "September": "September", "Oktober": "October", "November": "November", "Dezember": "December",
+        "Jan": "January", "Feb": "February", "Mrz": "March", "Mär": "March", "Apr": "April",
+        "Mai": "May", "Jun": "June", "Jul": "July", "Aug": "August",
+        "Sep": "September", "Okt": "October", "Nov": "November", "Dez": "December"
     }
     for de, en in translations.items():
-        text = text.replace(de, en)
+        text = re.sub(rf"\b{de}\b", en, text)
     return text
 
 
 def parse_event_date(date_str):
     """Extract only the starting date of an event as a datetime.date object."""
-    if not date_str:
+    if not date_str or date_str == "-":
         return None
 
-    # ISO format
-    try:
-        return datetime.datetime.fromisoformat(date_str).date()
-    except Exception:
-        pass
-
-    # Venster format: "Tue Oct 21 2025"
-    try:
-        return datetime.datetime.strptime(date_str.strip(), "%a %b %d %Y").date()
-    except Exception:
-        pass
-
-    # Translate German month names
     date_str = translate_date_to_english(date_str).strip()
-
-    # Remove German day abbreviations
     date_str = re.sub(r"^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)\s*", "", date_str, flags=re.IGNORECASE)
 
-    # "21. October 2025"
     match = re.search(r"(\d{1,2}\.\s*\w+)(?:\s*-\s*\d{1,2}\.\s*\w+)?\s*(\d{4})", date_str)
     if match:
         first_date, year = match.groups()
@@ -81,7 +71,14 @@ def parse_event_date(date_str):
         except ValueError:
             pass
 
-    # "6.12.2025"
+    match = re.search(r"(\d{4})-(\d{2})-(\d{2})", date_str)
+    if match:
+        year, month, day = match.groups()
+        try:
+            return datetime.date(int(year), int(month), int(day))
+        except ValueError:
+            return None
+
     match = re.search(r"(\d{1,2})[.\s](\d{1,2})[.\s](\d{4})", date_str)
     if match:
         day, month, year = match.groups()
@@ -93,31 +90,21 @@ def parse_event_date(date_str):
     return None
 
 
-def clean_time_string(text):
-    """Remove 'Uhr' and make time nice for Telegram."""
-    if not text or text == "-":
-        return "Start: -"
-    text = re.sub(r"\s*Uhr", "", text, flags=re.IGNORECASE)
-    return f"Start: {text.strip()}"
-
-
 def send_to_telegram(event_data):
-    """Send one event to Telegram with escaped HTML to avoid formatting issues."""
+    """Send one event to Telegram with escaped HTML."""
     date_obj = parse_event_date(event_data.get('date', '-'))
-    time_cleaned = clean_time_string(event_data.get('time', '-'))
-
+    time_field = event_data.get('time', '-')
     event_title = html.escape(event_data.get('event', '-'))
     lineup = html.escape(event_data.get('lineup', '-'))
     location = html.escape(event_data.get('location', '-'))
     url = html.escape(event_data.get('url', '-'))
 
-    # Format date display (show “-” if None)
     date_str = date_obj.strftime("%d %b %Y") if date_obj else "-"
 
     message = (
         f"🎉 Event: <b>{event_title}</b>\n"
         f"🗓 Date: {date_str}\n"
-        f"🕒 {time_cleaned}\n"
+        f"🕒 Start: {time_field}\n"
         f"🎶 Lineup: {lineup}\n"
         f"📍 Location: {location}\n"
         f"🔗 {url}"
@@ -148,25 +135,37 @@ def load_events_from_file(json_file):
 
 
 def main():
-    # 🕷️ Run all spiders
+    # 🕷️ Run spiders
     run_scrapy_spider(SPIDER_DASWERK)
     run_scrapy_spider(SPIDER_LOFT)
     run_scrapy_spider(SPIDER_U4)
     run_scrapy_spider(SPIDER_VENSTER)
     run_scrapy_spider(SPIDER_RHIZ)
+    run_scrapy_spider(SPIDER_LOOP)
+    run_scrapy_spider(SPIDER_BADESCHIFF)  # 🆕 added
 
-    # 📄 Load results
+    # 📄 Load JSON
     events_daswerk = load_events_from_file(JSON_FILE_DASWERK)
     events_loft = load_events_from_file(JSON_FILE_LOFT)
     events_u4 = load_events_from_file(JSON_FILE_U4)
     events_venster = load_events_from_file(JSON_FILE_VENSTER)
     events_rhiz = load_events_from_file(JSON_FILE_RHIZ)
+    events_loop = load_events_from_file(JSON_FILE_LOOP)
+    events_badeschiff = load_events_from_file(JSON_FILE_BADESCHIFF)  # 🆕 added
 
-    all_events = events_daswerk + events_loft + events_u4 + events_venster + events_rhiz
+    all_events = (
+        events_daswerk +
+        events_loft +
+        events_u4 +
+        events_venster +
+        events_rhiz +
+        events_loop +
+        events_badeschiff  # 🆕 added
+    )
 
     print(f"📊 Total events loaded: {len(all_events)}")
 
-    # 📅 Filter for today
+    # 📅 Filter for today's events
     today = datetime.date.today()
     todays_events = [e for e in all_events if parse_event_date(e.get('date')) == today]
 

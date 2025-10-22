@@ -1,5 +1,12 @@
 import scrapy
 import asyncio
+import requests
+import html
+
+
+# 📨 Telegram settings
+BOT_TOKEN = "8265964950:AAElIYRweC5NGReuuHAe95Ght8x6SzpNJWo"
+CHAT_ID = "-1002974853024"
 
 
 class Venster99Spider(scrapy.Spider):
@@ -14,15 +21,12 @@ class Venster99Spider(scrapy.Spider):
                 "encoding": "utf8",
             },
         },
-        # Playwright settings
         "PLAYWRIGHT_BROWSER_TYPE": "chromium",
         "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 60000,
-        # Keep things stable
         "CONCURRENT_REQUESTS": 2,
     }
 
     def start_requests(self):
-        # Use Playwright and include the page object so we can scroll
         yield scrapy.Request(
             self.start_urls[0],
             headers={
@@ -31,7 +35,7 @@ class Venster99Spider(scrapy.Spider):
             },
             meta={
                 "playwright": True,
-                "playwright_include_page": True,  # <-- gives us page in response.meta
+                "playwright_include_page": True,
             },
             callback=self.parse,
             dont_filter=True,
@@ -40,44 +44,65 @@ class Venster99Spider(scrapy.Spider):
     async def parse(self, response):
         page = response.meta["playwright_page"]
 
-        # Wait for the main wrapper to be present
         await page.wait_for_selector("#wrapper", timeout=30000)
 
-        # The template keeps the events section "inactive" until you scroll.
-        # Force multiple scrolls to trigger animations/lazy load.
+        # Scroll to load events
         for _ in range(6):
             await page.mouse.wheel(0, 1200)
             await asyncio.sleep(0.6)
 
-        # Give the page a moment after scrolling; then wait for events.
         await page.wait_for_selector("div.event", timeout=30000)
 
-        # Grab fully-rendered HTML and close the page
-        html = await page.content()
+        html_content = await page.content()
         await page.close()
-
-        # Replace response body with rendered HTML and parse with normal CSS
-        response = response.replace(body=html)
+        response = response.replace(body=html_content)
 
         events = response.css("div.event")
         self.logger.info(f"Venster99: found {len(events)} event blocks")
 
         for ev in events:
-            # date is the first <p> (e.g., "Tue Oct 21 2025")
             date_text = ev.css("p::text").get(default="").strip()
-
-            # title is inside <p><strong>…</strong></p>
             title_text = ev.css("p strong::text").get(default="").strip()
-
-            # link button (often Facebook)
             link = ev.css("a.button::attr(href)").get(default="-").strip()
 
-            yield {
+            item = {
                 "url": link or "-",
                 "event": title_text or "-",
                 "date": date_text or "-",
-                "time": "-",            # site doesn't list times on the cards
+                "time": "-",  # site doesn't list times
                 "content": [],
                 "location": "Venster 99",
                 "lineup": "-",
             }
+
+            # 📨 Send to Telegram
+            self.send_to_telegram(item)
+
+            yield item
+
+    def send_to_telegram(self, event_data):
+        event_title = html.escape(event_data.get('event', '-'))
+        date_str = html.escape(event_data.get('date', '-'))
+        time_str = html.escape(event_data.get('time', '-'))
+        location = html.escape(event_data.get('location', '-'))
+        url = html.escape(event_data.get('url', '-'))
+        lineup = html.escape(event_data.get('lineup', '-'))
+
+        message = (
+            f"🎉 Event: <b>{event_title}</b>\n"
+            f"🗓 Date: {date_str}\n"
+            f"🕒 Start: {time_str}\n"
+            f"🎶 Lineup: {lineup}\n"
+            f"📍 Location: {location}\n"
+            f"🔗 {url}"
+        )
+
+        r = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+        )
+
+        if r.status_code == 200:
+            self.logger.info(f"✅ Sent to Telegram: {event_data.get('event', '-')}")
+        else:
+            self.logger.error(f"❌ Failed to send {event_data.get('event', '-')} | {r.text}")

@@ -1,32 +1,33 @@
-import scrapy
 import re
+import scrapy
+import requests
+import html
 
-def convert_time_to_24h(text: str) -> str:
-    """Convert various time formats to HH:MM 24h format."""
-    if not text:
+# 📨 Telegram settings
+BOT_TOKEN = "8265964950:AAElIYRweC5NGReuuHAe95Ght8x6SzpNJWo"
+CHAT_ID = "-1003149617188"
+
+
+def to_24h(s: str) -> str:
+    """Convert '8:00 p.m.' / '8:00 pm' / '08:00' to 24h 'HH:MM'."""
+    if not s:
         return "-"
+    t = s.replace("\xa0", " ").replace("\u202f", " ").strip().lower()
+    # normalize am/pm variants
+    t = t.replace("a.m.", "am").replace("p.m.", "pm").replace("a.m", "am").replace("p.m", "pm")
 
-    t = text.replace("\xa0", " ").lower().strip()
+    m = re.search(r"(\d{1,2}):(\d{2})\s*(am|pm)?", t)
+    if not m:
+        return "-"
+    hh = int(m.group(1))
+    mm = m.group(2)
+    ap = (m.group(3) or "").lower()
 
-    # Match 24h times like 21:30 or 21:30 Uhr
-    m = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\s*(?:uhr)?\b", t)
-    if m:
-        hh, mm = int(m.group(1)), m.group(2)
-        return f"{hh:02d}:{mm}"
-
-    # Match 12h times like 9:30 pm or 9:30 am
-    m = re.search(r"\b([1-9]|1[0-2]):([0-5]\d)\s*(am|pm)\b", t)
-    if m:
-        hh = int(m.group(1))
-        mm = m.group(2)
-        ap = m.group(3)
-        if ap == "pm" and hh != 12:
-            hh += 12
-        if ap == "am" and hh == 12:
-            hh = 0
-        return f"{hh:02d}:{mm}"
-
-    return "-"
+    if ap == "pm" and hh != 12:
+        hh += 12
+    if ap == "am" and hh == 12:
+        hh = 0
+    return f"{hh:02d}:{mm}"
 
 
 class LoopSpider(scrapy.Spider):
@@ -36,71 +37,69 @@ class LoopSpider(scrapy.Spider):
 
     custom_settings = {
         "FEEDS": {
-            "loop.json": {
-                "format": "json",
-                "overwrite": True,
-                "encoding": "utf8",
-            }
+            "loop.json": {"format": "json", "overwrite": True, "encoding": "utf8"}
         }
     }
 
     def parse(self, response):
-        events = response.css("article.tribe-events-calendar-list__event")
-        self.logger.info(f"Loop: found {len(events)} events")
-
-        for ev in events:
+        for ev in response.css("article.tribe-events-calendar-list__event"):
             title = (ev.css("h3.tribe-events-calendar-list__event-title a::text").get() or "-").strip()
             url = ev.css("h3.tribe-events-calendar-list__event-title a::attr(href)").get()
-            if url:
-                url = response.urljoin(url)
-            else:
-                url = "-"
+            url = response.urljoin(url) if url else "-"
 
-            # Extract date
+            # DATE from datetime attr (YYYY-MM-DD)
             date_iso = (ev.css("time.tribe-events-calendar-list__event-datetime::attr(datetime)").get() or "-").strip()
             if "T" in date_iso:
-                date_iso = date_iso.split("T")[0]
+                date_iso = date_iso.split("T", 1)[0]
 
-            # Extract all text to find time
-            text_all = " ".join([t.strip() for t in ev.xpath(".//text()").getall() if t.strip()])
-            time_str = convert_time_to_24h(text_all)
+            # START TIME: convert to 24h
+            start_text = ev.xpath(
+                'normalize-space(.//time[contains(@class,"tribe-events-calendar-list__event-datetime")]'
+                '//span[contains(@class,"tribe-event-date-start")])'
+            ).get()
+            time_24 = to_24h(start_text)
 
-            if time_str == "-" and url != "-":
-                yield response.follow(
-                    url,
-                    callback=self.parse_event,
-                    cb_kwargs={"title_hint": title, "date_hint": date_iso}
-                )
-            else:
-                content = [t.strip() for t in ev.css("*::text").getall() if t.strip()]
-                yield {
-                    "url": url,
-                    "event": title,
-                    "date": date_iso if date_iso else "-",
-                    "time": time_str,
-                    "content": content,
-                    "location": "Loop Bar Vienna",
-                    "lineup": "-"
-                }
+            # Optional short description
+            content = [t.strip() for t in ev.css("div.tribe-events-calendar-list__event-description *::text").getall() if t.strip()]
 
-    def parse_event(self, response, title_hint, date_hint):
-        title = (response.css("h1.entry-title::text").get() or title_hint or "-").strip()
-        date_iso = (response.css("time::attr(datetime)").get() or date_hint or "-").strip()
-        if "T" in date_iso:
-            date_iso = date_iso.split("T")[0]
+            item = {
+                "url": url,
+                "event": title,
+                "date": date_iso,
+                "time": time_24,
+                "content": content,
+                "location": "Loop Bar Vienna",
+                "lineup": "-"
+            }
 
-        # Extract text from detail page to find time
-        page_text = " ".join([t.strip() for t in response.xpath("//body//text()").getall() if t.strip()])
-        time_str = convert_time_to_24h(page_text)
+            # 📨 Immediately send to Telegram
+            self.send_to_telegram(item)
 
-        content = [t.strip() for t in response.css("*::text").getall() if t.strip()]
+            yield item
 
-        yield {
-            "url": response.url,
-            "event": title,
-            "date": date_iso if date_iso else "-",
-            "time": time_str,
-            "content": content,
-            "location": "Loop Bar Vienna",
-            "lineup": "-"
-        }
+    def send_to_telegram(self, event_data):
+        event_title = html.escape(event_data.get('event', '-'))
+        date_str = html.escape(event_data.get('date', '-'))
+        time_str = html.escape(event_data.get('time', '-'))
+        location = html.escape(event_data.get('location', '-'))
+        url = html.escape(event_data.get('url', '-'))
+        lineup = html.escape(event_data.get('lineup', '-'))
+
+        message = (
+            f"🎉 Event: <b>{event_title}</b>\n"
+            f"🗓 Date: {date_str}\n"
+            f"🕒 Start: {time_str}\n"
+            f"🎶 Lineup: {lineup}\n"
+            f"📍 Location: {location}\n"
+            f"🔗 {url}"
+        )
+
+        r = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+        )
+
+        if r.status_code == 200:
+            self.logger.info(f"✅ Sent to Telegram: {event_data.get('event', '-')}")
+        else:
+            self.logger.error(f"❌ Failed to send {event_data.get('event', '-')} | {r.text}")

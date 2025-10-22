@@ -1,5 +1,12 @@
 import scrapy
 import json
+import requests
+import html
+
+# 📨 Telegram settings
+BOT_TOKEN = "8265964950:AAElIYRweC5NGReuuHAe95Ght8x6SzpNJWo"
+CHAT_ID = "-1003158169981"
+
 
 class U4Spider(scrapy.Spider):
     name = 'u4'
@@ -64,7 +71,7 @@ class U4Spider(scrapy.Spider):
         else:
             title = response.css('h1::text').get(default='-').strip()
 
-        yield {
+        item = {
             'url': response.url,
             'event': title,
             'date': formatted_date,
@@ -73,4 +80,36 @@ class U4Spider(scrapy.Spider):
             'location': 'U4 Club Wien',
             'lineup': '-'
         }
+
+        # 📨 Send to Telegram
+        self.send_to_telegram(item)
+
+        yield item
+
+    def send_to_telegram(self, event_data):
+        event_title = html.escape(event_data.get('event', '-'))
+        date_str = html.escape(event_data.get('date', '-'))
+        time_str = html.escape(event_data.get('time', '-'))
+        location = html.escape(event_data.get('location', '-'))
+        url = html.escape(event_data.get('url', '-'))
+        lineup = html.escape(event_data.get('lineup', '-'))
+
+        message = (
+            f"🎉 Event: <b>{event_title}</b>\n"
+            f"🗓 Date: {date_str}\n"
+            f"🕒 Start: {time_str}\n"
+            f"🎶 Lineup: {lineup}\n"
+            f"📍 Location: {location}\n"
+            f"🔗 {url}"
+        )
+
+        r = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+        )
+
+        if r.status_code == 200:
+            self.logger.info(f"✅ Sent to Telegram: {event_data.get('event', '-')}")
+        else:
+            self.logger.error(f"❌ Failed to send {event_data.get('event', '-')} | {r.text}")
 

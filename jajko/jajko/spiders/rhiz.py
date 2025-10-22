@@ -1,6 +1,13 @@
 import re
 import scrapy
+import requests
+import html
 from datetime import datetime
+
+
+# 📨 Telegram settings
+BOT_TOKEN = "8265964950:AAElIYRweC5NGReuuHAe95Ght8x6SzpNJWo"
+CHAT_ID = "-1002744915149"
 
 
 class RhizSpider(scrapy.Spider):
@@ -74,7 +81,7 @@ class RhizSpider(scrapy.Spider):
             if t and t.strip()
         ]
 
-        yield {
+        item = {
             "url": response.url,
             "event": title or "-",
             "date": date_text or "-",
@@ -83,6 +90,11 @@ class RhizSpider(scrapy.Spider):
             "location": "rhiz wien",
             "lineup": "-"
         }
+
+        # 📨 Immediately send to Telegram
+        self.send_to_telegram(item)
+
+        yield item
 
     def clean_date(self, raw):
         """Convert raw date strings like 'today', 'sa 300526' etc. to YYYY-MM-DD."""
@@ -112,3 +124,30 @@ class RhizSpider(scrapy.Spider):
 
         # Case 4: If nothing worked, return raw
         return raw
+
+    def send_to_telegram(self, event_data):
+        event_title = html.escape(event_data.get('event', '-'))
+        date_str = html.escape(event_data.get('date', '-'))
+        time_str = html.escape(event_data.get('time', '-'))
+        location = html.escape(event_data.get('location', '-'))
+        url = html.escape(event_data.get('url', '-'))
+        lineup = html.escape(event_data.get('lineup', '-'))
+
+        message = (
+            f"🎉 Event: <b>{event_title}</b>\n"
+            f"🗓 Date: {date_str}\n"
+            f"🕒 Start: {time_str}\n"
+            f"🎶 Lineup: {lineup}\n"
+            f"📍 Location: {location}\n"
+            f"🔗 {url}"
+        )
+
+        r = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+        )
+
+        if r.status_code == 200:
+            self.logger.info(f"✅ Sent to Telegram: {event_data.get('event', '-')}")
+        else:
+            self.logger.error(f"❌ Failed to send {event_data.get('event', '-')} | {r.text}")
