@@ -15,7 +15,7 @@ JSON_FILE_U4 = "u4_events.json"
 JSON_FILE_VENSTER = "venster99.json"
 JSON_FILE_RHIZ = "rhiz.json"
 JSON_FILE_LOOP = "loop.json"
-JSON_FILE_BADESCHIFF = "badeschiff.json"   # 🆕 added
+JSON_FILE_BADESCHIFF = "badeschiff.json"
 
 SPIDER_DASWERK = "daswerk"
 SPIDER_LOFT = "loft"
@@ -23,7 +23,7 @@ SPIDER_U4 = "u4"
 SPIDER_VENSTER = "venster99"
 SPIDER_RHIZ = "rhiz"
 SPIDER_LOOP = "loop"
-SPIDER_BADESCHIFF = "bad"           # 🆕 added
+SPIDER_BADESCHIFF = "bad"
 # ===============
 
 
@@ -142,7 +142,7 @@ def main():
     run_scrapy_spider(SPIDER_VENSTER)
     run_scrapy_spider(SPIDER_RHIZ)
     run_scrapy_spider(SPIDER_LOOP)
-    run_scrapy_spider(SPIDER_BADESCHIFF)  # 🆕 added
+    run_scrapy_spider(SPIDER_BADESCHIFF)
 
     # 📄 Load JSON
     events_daswerk = load_events_from_file(JSON_FILE_DASWERK)
@@ -151,7 +151,7 @@ def main():
     events_venster = load_events_from_file(JSON_FILE_VENSTER)
     events_rhiz = load_events_from_file(JSON_FILE_RHIZ)
     events_loop = load_events_from_file(JSON_FILE_LOOP)
-    events_badeschiff = load_events_from_file(JSON_FILE_BADESCHIFF)  # 🆕 added
+    events_badeschiff = load_events_from_file(JSON_FILE_BADESCHIFF)
 
     all_events = (
         events_daswerk +
